@@ -30,6 +30,7 @@ export default function Home() {
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editRegNum, setEditRegNum] = useState('');
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
   const startEditing = (patient: Patient) => {
     setEditingPatientId(patient.id);
@@ -47,6 +48,12 @@ export default function Home() {
       };
     }));
     setEditingPatientId(null);
+  };
+
+  const deletePatient = (patientId: string) => {
+    if (confirm('이 환자 기록을 완전히 삭제하시겠습니까?')) {
+      setPatients(patients.filter(p => p.id !== patientId));
+    }
   };
 
   // Auto-remove discharged patients after 2 days
@@ -177,8 +184,28 @@ export default function Home() {
                   {p.treatmentDailyStatus === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
                   {p.treatmentDailyStatus === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
                 </button>
-                <span className="font-bold text-gray-800 mr-2">{p.name}</span>
-                <span className="text-gray-500 font-mono text-xs">{p.regNumber}</span>
+                {openDropdownId === p.id ? (
+                  <select
+                    autoFocus
+                    value={p.allocation}
+                    onBlur={() => setOpenDropdownId(null)}
+                    onChange={(e) => {
+                      handleAllocationChange(p.id, e.target.value as AllocationType);
+                      setOpenDropdownId(null);
+                    }}
+                    className="font-bold text-gray-800 bg-white border border-gray-300 rounded px-1 py-0.5 outline-none mr-2"
+                  >
+                    <option value="mon-wed">월/수 배정</option>
+                    <option value="tue-thu">화/목 배정</option>
+                    <option value="early">조기 (집중)</option>
+                    <option value="unassigned">대기 목록</option>
+                    <option value="discharge">Discharge</option>
+                  </select>
+                ) : (
+                  <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors mr-2 cursor-pointer text-left focus:outline-none underline decoration-gray-300 underline-offset-4">
+                    {p.name}
+                  </button>
+                )}
               </div>
               <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch sm:items-center gap-2 md:gap-0 md:flex-1 md:mx-2 md:border-l md:border-gray-100 md:pl-2">
                 <input
@@ -190,17 +217,6 @@ export default function Home() {
                     setPatients(patients.map(patient => patient.id === p.id ? { ...patient, memo: e.target.value } : patient));
                   }}
                 />
-                <select
-                  value={p.allocation}
-                  onChange={(e) => handleAllocationChange(p.id, e.target.value as AllocationType)}
-                  className="bg-gray-50 md:bg-transparent text-gray-600 md:text-gray-500 hover:bg-gray-100 md:hover:bg-gray-50 text-xs font-medium px-2 py-1.5 md:py-1 rounded border border-gray-200 outline-none transition-colors cursor-pointer sm:ml-2"
-                >
-                  <option value="mon-wed">월/수 배정</option>
-                  <option value="tue-thu">화/목 배정</option>
-                  <option value="early">조기 (집중)</option>
-                  <option value="unassigned">대기 목록</option>
-                  <option value="discharge">Discharge</option>
-                </select>
               </div>
             </li>
           ))}
@@ -305,19 +321,35 @@ export default function Home() {
                           </td>
                           <td className="px-3 md:px-6 py-3 md:py-4 flex gap-2">
                             {isEditing ? (
-                              <button
-                                onClick={() => saveEdit(patient.id)}
-                                className="text-white bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded text-xs transition-colors shrink-0"
-                              >
-                                저장
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => saveEdit(patient.id)}
+                                  className="text-white bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded text-xs transition-colors shrink-0"
+                                >
+                                  저장
+                                </button>
+                                <button
+                                  onClick={() => setEditingPatientId(null)}
+                                  className="text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 border border-gray-200 rounded text-xs transition-colors shrink-0"
+                                >
+                                  취소
+                                </button>
+                              </>
                             ) : (
-                              <button
-                                onClick={() => startEditing(patient)}
-                                className="text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-200 px-3 py-1.5 rounded text-xs transition-colors shrink-0"
-                              >
-                                수정
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => startEditing(patient)}
+                                  className="text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-200 px-3 py-1.5 rounded text-xs transition-colors shrink-0"
+                                >
+                                  수정
+                                </button>
+                                <button
+                                  onClick={() => deletePatient(patient.id)}
+                                  className="text-red-500 bg-red-50 hover:bg-red-100 border border-red-100 px-3 py-1.5 rounded text-xs transition-colors shrink-0"
+                                >
+                                  삭제
+                                </button>
+                              </>
                             )}
                           </td>
                         </tr>
