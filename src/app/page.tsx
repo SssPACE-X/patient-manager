@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 
 type AllocationType = 'unassigned' | 'mon-wed' | 'tue-thu' | 'early' | 'discharge';
 
+type TreatmentStatus = 'none' | 'done' | 'missed';
+
 interface Patient {
   id: string;
   name: string;
@@ -12,6 +14,8 @@ interface Patient {
   createdAt: Date;
   dischargedAt?: Date;
   memo?: string;
+  treatmentDailyStatus?: TreatmentStatus;
+  treatmentUpdatedAt?: Date;
 }
 
 export default function Home() {
@@ -57,8 +61,42 @@ export default function Home() {
       }));
     };
 
+    // Auto-reset treatment daily status at 08:00 AM
+    const checkTreatmentReset = () => {
+      const now = new Date();
+
+      // Calculate the most recent 08:00 AM cutoff
+      const cutoff = new Date(now);
+      cutoff.setHours(8, 0, 0, 0);
+
+      // If currently before 8 AM, the cutoff was 8 AM yesterday
+      if (now.getHours() < 8) {
+        cutoff.setDate(cutoff.getDate() - 1);
+      }
+
+      setPatients(prev => prev.map(p => {
+        if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') return p;
+
+        // If the treatment was updated before the most recent cutoff, reset it.
+        // If it was never updated, also reset it (fallback).
+        if (!p.treatmentUpdatedAt || p.treatmentUpdatedAt < cutoff) {
+          return {
+            ...p,
+            treatmentDailyStatus: 'none',
+          };
+        }
+        return p;
+      }));
+    };
+
     checkDischarged(); // Check on mount
-    const interval = setInterval(checkDischarged, 1000 * 60 * 60); // Check every hour
+    checkTreatmentReset();
+
+    const interval = setInterval(() => {
+      checkDischarged();
+      checkTreatmentReset();
+    }, 1000 * 60 * 60); // Check every hour
+
     return () => clearInterval(interval);
   }, []);
 
@@ -91,6 +129,23 @@ export default function Home() {
     }));
   };
 
+  const toggleTreatmentStatus = (patientId: string) => {
+    setPatients(patients.map(p => {
+      if (p.id !== patientId) return p;
+
+      let nextStatus: TreatmentStatus = 'none';
+      if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') nextStatus = 'done';
+      else if (p.treatmentDailyStatus === 'done') nextStatus = 'missed';
+      else nextStatus = 'none';
+
+      return {
+        ...p,
+        treatmentDailyStatus: nextStatus,
+        treatmentUpdatedAt: new Date(),
+      };
+    }));
+  };
+
   const waitingPatients = patients.filter(p => p.allocation === 'unassigned');
   const assignedPatients = {
     'mon-wed': patients.filter(p => p.allocation === 'mon-wed'),
@@ -111,7 +166,17 @@ export default function Home() {
         <ul className="space-y-2">
           {list.map(p => (
             <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-0 text-sm">
-              <div className="flex justify-between w-full md:w-auto">
+              <div className="flex justify-between w-full md:w-auto items-center">
+                <button
+                  onClick={() => toggleTreatmentStatus(p.id)}
+                  className={`w-6 h-6 mr-3 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none' ? 'border-gray-300 bg-white hover:bg-gray-50' :
+                    p.treatmentDailyStatus === 'done' ? 'border-green-500 bg-green-50 text-green-600' :
+                      'border-red-500 bg-red-50 text-red-600'
+                    }`}
+                >
+                  {p.treatmentDailyStatus === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                  {p.treatmentDailyStatus === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
+                </button>
                 <span className="font-bold text-gray-800 mr-2">{p.name}</span>
                 <span className="text-gray-500 font-mono text-xs">{p.regNumber}</span>
               </div>
