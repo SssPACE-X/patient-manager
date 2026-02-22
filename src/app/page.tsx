@@ -445,6 +445,7 @@ export default function Home() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">환자 이름</label>
                   <input
+                    autoFocus
                     type="text"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
