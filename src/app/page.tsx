@@ -281,8 +281,8 @@ export default function Home() {
       ) : (
         <ul className="space-y-2">
           {list.map(p => (
-            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-0 text-sm">
-              <div className="flex justify-between w-full md:w-auto items-center">
+            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-row items-center justify-between text-sm overflow-x-auto whitespace-nowrap gap-3">
+              <div className="flex items-center flex-shrink-0">
                 <button
                   onClick={() => toggleTreatmentStatus(p.id)}
                   className={`w-6 h-6 mr-3 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none' ? 'border-gray-300 bg-white hover:bg-gray-50' :
@@ -302,7 +302,7 @@ export default function Home() {
                       handleAllocationChange(p.id, e.target.value as AllocationType);
                       setOpenDropdownId(null);
                     }}
-                    className="font-bold text-gray-800 bg-white border border-gray-300 rounded px-1 py-0.5 outline-none mr-2"
+                    className="font-bold text-gray-800 bg-white border border-gray-300 rounded px-1 py-0.5 outline-none mr-2 flex-shrink-0"
                   >
                     <option value="mon-wed">월/수 배정</option>
                     <option value="tue-thu">화/목 배정</option>
@@ -311,12 +311,12 @@ export default function Home() {
                     <option value="discharge">Discharge</option>
                   </select>
                 ) : (
-                  <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors mr-2 cursor-pointer text-left focus:outline-none underline decoration-gray-300 underline-offset-4">
+                  <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors mr-2 cursor-pointer text-left focus:outline-none underline decoration-gray-300 underline-offset-4 flex-shrink-0 max-w-[120px] truncate">
                     {p.name}
                   </button>
                 )}
               </div>
-              <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch sm:items-center gap-2 md:gap-0 md:flex-1 md:mx-2 md:border-l md:border-gray-100 md:pl-2">
+              <div className="flex-1 min-w-[120px]">
                 <input
                   type="text"
                   placeholder="병동 / 호실 번호"
