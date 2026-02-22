@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 type AllocationType = 'unassigned' | 'mon-wed' | 'tue-thu' | 'early' | 'discharge';
 
@@ -38,84 +39,173 @@ export default function Home() {
     setEditRegNum(patient.regNumber);
   };
 
-  const saveEdit = (patientId: string) => {
+  const saveEdit = async (patientId: string) => {
+    const finalName = editName.trim();
+    const finalRegNum = editRegNum.trim();
+
+    // Optimistic update
+    const patientToUpdate = patients.find(p => p.id === patientId);
+    if (!patientToUpdate) return;
+
+    const newName = finalName || patientToUpdate.name;
+    const newRegNum = finalRegNum || patientToUpdate.regNumber;
+
     setPatients(patients.map(p => {
       if (p.id !== patientId) return p;
-      return {
-        ...p,
-        name: editName.trim() || p.name,
-        regNumber: editRegNum.trim() || p.regNumber,
-      };
+      return { ...p, name: newName, regNumber: newRegNum };
     }));
     setEditingPatientId(null);
+
+    // DB Update
+    await supabase.from('patients').update({
+      name: newName,
+      reg_number: newRegNum
+    }).eq('id', patientId);
   };
 
-  const deletePatient = (patientId: string) => {
+  const deletePatient = async (patientId: string) => {
     if (confirm('이 환자 기록을 완전히 삭제하시겠습니까?')) {
       setPatients(patients.filter(p => p.id !== patientId));
+      await supabase.from('patients').delete().eq('id', patientId);
     }
   };
 
-  // Auto-remove discharged patients after 2 days
+  const handleMemoBlur = async (patientId: string, memo: string) => {
+    await supabase.from('patients').update({ memo }).eq('id', patientId);
+  };
+
+  // Initial Fetch & Realtime Subscription
   useEffect(() => {
-    const checkDischarged = () => {
-      const now = new Date();
-      setPatients(prev => prev.filter(p => {
-        if (p.allocation !== 'discharge' || !p.dischargedAt) return true;
-
-        const diffDays = (now.getTime() - p.dischargedAt.getTime()) / (1000 * 3600 * 24);
-        return diffDays < 2; // Keep if discharged within 2 days
-      }));
-    };
-
-    // Auto-reset treatment daily status at 08:00 AM
-    const checkTreatmentReset = () => {
-      const now = new Date();
-
-      // Calculate the most recent 08:00 AM cutoff
-      const cutoff = new Date(now);
-      cutoff.setHours(8, 0, 0, 0);
-
-      // If currently before 8 AM, the cutoff was 8 AM yesterday
-      if (now.getHours() < 8) {
-        cutoff.setDate(cutoff.getDate() - 1);
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+        Notification.requestPermission();
       }
+    }
 
-      setPatients(prev => prev.map(p => {
-        if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') return p;
+    const fetchPatients = async () => {
+      const { data } = await supabase
+        .from('patients')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-        // If the treatment was updated before the most recent cutoff, reset it.
-        // If it was never updated, also reset it (fallback).
-        if (!p.treatmentUpdatedAt || p.treatmentUpdatedAt < cutoff) {
-          return {
-            ...p,
-            treatmentDailyStatus: 'none',
-          };
-        }
-        return p;
-      }));
+      if (data) {
+        setPatients(data.map(p => ({
+          id: p.id,
+          name: p.name,
+          regNumber: p.reg_number,
+          allocation: p.allocation as AllocationType,
+          createdAt: new Date(p.created_at),
+          dischargedAt: p.discharged_at ? new Date(p.discharged_at) : undefined,
+          memo: p.memo || undefined,
+          treatmentDailyStatus: p.treatment_daily_status as TreatmentStatus,
+          treatmentUpdatedAt: p.treatment_updated_at ? new Date(p.treatment_updated_at) : undefined,
+        })));
+      }
     };
 
-    checkDischarged(); // Check on mount
-    checkTreatmentReset();
+    fetchPatients();
 
-    const interval = setInterval(() => {
-      checkDischarged();
-      checkTreatmentReset();
-    }, 1000 * 60 * 60); // Check every hour
+    const channel = supabase
+      .channel('public:patients')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'patients' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const p = payload.new;
+          setPatients(prev => {
+            if (prev.find(existing => existing.id === p.id)) return prev;
 
-    return () => clearInterval(interval);
+            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+              new Notification('신규 환자 등록', { body: `새로운 환자 ${p.name}님이 등록되었습니다.` });
+            }
+
+            return [{
+              id: p.id,
+              name: p.name,
+              regNumber: p.reg_number,
+              allocation: p.allocation,
+              createdAt: new Date(p.created_at),
+              dischargedAt: p.discharged_at ? new Date(p.discharged_at) : undefined,
+              memo: p.memo || undefined,
+              treatmentDailyStatus: p.treatment_daily_status,
+              treatmentUpdatedAt: p.treatment_updated_at ? new Date(p.treatment_updated_at) : undefined,
+            }, ...prev];
+          });
+        }
+        else if (payload.eventType === 'UPDATE') {
+          const p = payload.new;
+          setPatients(prev => prev.map(existing => {
+            if (existing.id === p.id) {
+              return {
+                id: p.id,
+                name: p.name,
+                regNumber: p.reg_number,
+                allocation: p.allocation,
+                createdAt: new Date(p.created_at),
+                dischargedAt: p.discharged_at ? new Date(p.discharged_at) : undefined,
+                memo: p.memo || undefined,
+                treatmentDailyStatus: p.treatment_daily_status,
+                treatmentUpdatedAt: p.treatment_updated_at ? new Date(p.treatment_updated_at) : undefined,
+              };
+            }
+            return existing;
+          }));
+        }
+        else if (payload.eventType === 'DELETE') {
+          setPatients(prev => prev.filter(existing => existing.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  const handleRegister = (e: React.FormEvent) => {
+  // Time-based background rules (Discharge auto-delete & Treatment Reset)
+  useEffect(() => {
+    const applyRules = async () => {
+      const now = new Date();
+
+      // 1. Check Discharged
+      for (const p of patients) {
+        if (p.allocation === 'discharge' && p.dischargedAt) {
+          const diffDays = (now.getTime() - p.dischargedAt.getTime()) / (1000 * 3600 * 24);
+          if (diffDays >= 2) {
+            await supabase.from('patients').delete().eq('id', p.id);
+          }
+        }
+      }
+
+      // 2. Check Auto Reset
+      const cutoff = new Date(now);
+      cutoff.setHours(8, 0, 0, 0);
+      if (now.getHours() < 8) cutoff.setDate(cutoff.getDate() - 1);
+
+      for (const p of patients) {
+        if (p.treatmentDailyStatus && p.treatmentDailyStatus !== 'none') {
+          if (!p.treatmentUpdatedAt || p.treatmentUpdatedAt < cutoff) {
+            await supabase.from('patients').update({
+              treatment_daily_status: 'none',
+              treatment_updated_at: now.toISOString()
+            }).eq('id', p.id);
+          }
+        }
+      }
+    };
+
+    const interval = setInterval(applyRules, 1000 * 60); // Check every minute
+    return () => clearInterval(interval);
+  }, [patients]);
+
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newRegNum.trim()) return;
 
+    const newId = Date.now().toString();
     const newPatient: Patient = {
-      id: Date.now().toString(),
+      id: newId,
       name: newName.trim(),
       regNumber: newRegNum.trim(),
-      allocation: 'unassigned', // Default to unassigned when newly registered
+      allocation: 'unassigned',
       createdAt: new Date(),
     };
 
@@ -123,34 +213,53 @@ export default function Home() {
     setNewName('');
     setNewRegNum('');
     setIsRegistrationModalOpen(false);
+
+    await supabase.from('patients').insert([{
+      id: newId,
+      name: newPatient.name,
+      reg_number: newPatient.regNumber,
+      allocation: newPatient.allocation,
+      created_at: newPatient.createdAt.toISOString()
+    }]);
   };
 
-  const handleAllocationChange = (patientId: string, newAllocation: AllocationType) => {
-    setPatients(patients.map(p => {
-      if (p.id !== patientId) return p;
-      return {
-        ...p,
-        allocation: newAllocation,
-        dischargedAt: newAllocation === 'discharge' && p.allocation !== 'discharge' ? new Date() : p.dischargedAt,
-      };
+  const handleAllocationChange = async (patientId: string, newAllocation: AllocationType) => {
+    const p = patients.find(x => x.id === patientId);
+    if (!p) return;
+
+    const dischargedAt = newAllocation === 'discharge' && p.allocation !== 'discharge' ? new Date() : p.dischargedAt;
+
+    setPatients(patients.map(x => {
+      if (x.id !== patientId) return x;
+      return { ...x, allocation: newAllocation, dischargedAt };
     }));
+
+    await supabase.from('patients').update({
+      allocation: newAllocation,
+      discharged_at: dischargedAt ? dischargedAt.toISOString() : null
+    }).eq('id', patientId);
   };
 
-  const toggleTreatmentStatus = (patientId: string) => {
-    setPatients(patients.map(p => {
-      if (p.id !== patientId) return p;
+  const toggleTreatmentStatus = async (patientId: string) => {
+    const p = patients.find(x => x.id === patientId);
+    if (!p) return;
 
-      let nextStatus: TreatmentStatus = 'none';
-      if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') nextStatus = 'done';
-      else if (p.treatmentDailyStatus === 'done') nextStatus = 'missed';
-      else nextStatus = 'none';
+    let nextStatus: TreatmentStatus = 'none';
+    if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') nextStatus = 'done';
+    else if (p.treatmentDailyStatus === 'done') nextStatus = 'missed';
+    else nextStatus = 'none';
 
-      return {
-        ...p,
-        treatmentDailyStatus: nextStatus,
-        treatmentUpdatedAt: new Date(),
-      };
+    const now = new Date();
+
+    setPatients(patients.map(x => {
+      if (x.id !== patientId) return x;
+      return { ...x, treatmentDailyStatus: nextStatus, treatmentUpdatedAt: now };
     }));
+
+    await supabase.from('patients').update({
+      treatment_daily_status: nextStatus,
+      treatment_updated_at: now.toISOString()
+    }).eq('id', patientId);
   };
 
   const waitingPatients = patients.filter(p => p.allocation === 'unassigned');
@@ -216,6 +325,7 @@ export default function Home() {
                   onChange={(e) => {
                     setPatients(patients.map(patient => patient.id === p.id ? { ...patient, memo: e.target.value } : patient));
                   }}
+                  onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
                 />
               </div>
             </li>
@@ -413,6 +523,7 @@ export default function Home() {
                             onChange={(e) => {
                               setPatients(patients.map(p => p.id === patient.id ? { ...p, memo: e.target.value } : p));
                             }}
+                            onBlur={(e) => handleMemoBlur(patient.id, e.target.value)}
                           />
                         </td>
                       </tr>
