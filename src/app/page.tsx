@@ -150,9 +150,7 @@ export default function Home() {
           setPatients(prev => {
             if (prev.find(existing => existing.id === p.id)) return prev;
 
-            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification('신규 환자 등록', { body: `새로운 환자 ${p.name}님이 등록되었습니다.` });
-            }
+
 
             return [{
               id: p.id,
