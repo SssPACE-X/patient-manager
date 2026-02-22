@@ -91,8 +91,6 @@ export default function Home() {
     }));
   };
 
-  const getCount = (type: AllocationType) => patients.filter(p => p.allocation === type).length;
-
   const waitingPatients = patients.filter(p => p.allocation === 'unassigned');
   const assignedPatients = {
     'mon-wed': patients.filter(p => p.allocation === 'mon-wed'),
