@@ -76,11 +76,48 @@ export default function Home() {
 
   // Initial Fetch & Realtime Subscription
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-        Notification.requestPermission();
+    const initPush = async () => {
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+
+            // Convert VAPID public key
+            const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+            if (!publicVapidKey) return;
+
+            const base64UrlToUint8Array = (base64UrlData: string) => {
+              const padding = '='.repeat((4 - base64UrlData.length % 4) % 4);
+              const base64 = (base64UrlData + padding).replace(/\-/g, '+').replace(/_/g, '/');
+              const rawData = window.atob(base64);
+              const outputArray = new Uint8Array(rawData.length);
+              for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+              }
+              return outputArray;
+            };
+
+            let subscription = await registration.pushManager.getSubscription();
+            if (!subscription) {
+              subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: base64UrlToUint8Array(publicVapidKey)
+              });
+
+              await fetch('/api/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscription)
+              });
+            }
+          } catch (error) {
+            console.error('Push error:', error);
+          }
+        }
       }
-    }
+    };
+    initPush();
 
     const fetchPatients = async () => {
       const { data } = await supabase
@@ -221,6 +258,12 @@ export default function Home() {
       allocation: newPatient.allocation,
       created_at: newPatient.createdAt.toISOString()
     }]);
+
+    await fetch('/api/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `${newPatient.name}님이 등록되었습니다.` })
+    }).catch(console.error);
   };
 
   const handleAllocationChange = async (patientId: string, newAllocation: AllocationType) => {
@@ -568,7 +611,9 @@ export default function Home() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">등록 번호 (숫자 8자리)</label>
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={newRegNum}
                     onChange={(e) => {
                       const val = e.target.value.replace(/[^0-9]/g, '');
