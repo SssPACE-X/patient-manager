@@ -17,7 +17,17 @@ interface Patient {
   memo?: string;
   treatmentDailyStatus?: TreatmentStatus;
   treatmentUpdatedAt?: Date;
+  diagnosis?: string;
+  missedReason?: string;
 }
+
+const parseSafeDate = (dateStr: string | null | undefined): Date | undefined => {
+  if (!dateStr) return undefined;
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) return d;
+  const fallback = new Date(dateStr.replace(' ', 'T'));
+  return !isNaN(fallback.getTime()) ? fallback : undefined;
+};
 
 export default function Home() {
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
@@ -74,51 +84,8 @@ export default function Home() {
     await supabase.from('patients').update({ memo }).eq('id', patientId);
   };
 
-  // Initial Fetch & Realtime Subscription
+  // Realtime Subscription
   useEffect(() => {
-    const initPush = async () => {
-      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          try {
-            const registration = await navigator.serviceWorker.ready;
-
-            // Convert VAPID public key
-            const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-            if (!publicVapidKey) return;
-
-            const base64UrlToUint8Array = (base64UrlData: string) => {
-              const padding = '='.repeat((4 - base64UrlData.length % 4) % 4);
-              const base64 = (base64UrlData + padding).replace(/\-/g, '+').replace(/_/g, '/');
-              const rawData = window.atob(base64);
-              const outputArray = new Uint8Array(rawData.length);
-              for (let i = 0; i < rawData.length; ++i) {
-                outputArray[i] = rawData.charCodeAt(i);
-              }
-              return outputArray;
-            };
-
-            let subscription = await registration.pushManager.getSubscription();
-            if (!subscription) {
-              subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: base64UrlToUint8Array(publicVapidKey)
-              });
-
-              await fetch('/api/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(subscription)
-              });
-            }
-          } catch (error) {
-            console.error('Push error:', error);
-          }
-        }
-      }
-    };
-    initPush();
-
     const fetchPatients = async () => {
       const { data } = await supabase
         .from('patients')
@@ -131,11 +98,13 @@ export default function Home() {
           name: p.name,
           regNumber: p.reg_number,
           allocation: p.allocation as AllocationType,
-          createdAt: new Date(p.created_at),
-          dischargedAt: p.discharged_at ? new Date(p.discharged_at) : undefined,
+          createdAt: parseSafeDate(p.created_at) || new Date(),
+          dischargedAt: parseSafeDate(p.discharged_at),
           memo: p.memo || undefined,
+          diagnosis: p.diagnosis || undefined,
+          missedReason: p.missed_reason || undefined,
           treatmentDailyStatus: p.treatment_daily_status as TreatmentStatus,
-          treatmentUpdatedAt: p.treatment_updated_at ? new Date(p.treatment_updated_at) : undefined,
+          treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
         })));
       }
     };
@@ -157,11 +126,13 @@ export default function Home() {
               name: p.name,
               regNumber: p.reg_number,
               allocation: p.allocation,
-              createdAt: new Date(p.created_at),
-              dischargedAt: p.discharged_at ? new Date(p.discharged_at) : undefined,
+              createdAt: parseSafeDate(p.created_at) || new Date(),
+              dischargedAt: parseSafeDate(p.discharged_at),
               memo: p.memo || undefined,
+              diagnosis: p.diagnosis || undefined,
+              missedReason: p.missed_reason || undefined,
               treatmentDailyStatus: p.treatment_daily_status,
-              treatmentUpdatedAt: p.treatment_updated_at ? new Date(p.treatment_updated_at) : undefined,
+              treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
             }, ...prev];
           });
         }
@@ -174,11 +145,13 @@ export default function Home() {
                 name: p.name,
                 regNumber: p.reg_number,
                 allocation: p.allocation,
-                createdAt: new Date(p.created_at),
-                dischargedAt: p.discharged_at ? new Date(p.discharged_at) : undefined,
+                createdAt: parseSafeDate(p.created_at) || existing.createdAt,
+                dischargedAt: parseSafeDate(p.discharged_at),
                 memo: p.memo || undefined,
+                diagnosis: p.diagnosis || undefined,
+                missedReason: p.missed_reason || undefined,
                 treatmentDailyStatus: p.treatment_daily_status,
-                treatmentUpdatedAt: p.treatment_updated_at ? new Date(p.treatment_updated_at) : undefined,
+                treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
               };
             }
             return existing;
@@ -230,6 +203,58 @@ export default function Home() {
     const interval = setInterval(applyRules, 1000 * 60); // Check every minute
     return () => clearInterval(interval);
   }, [patients]);
+
+  const handleEnablePush = async () => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window) {
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const registration = await navigator.serviceWorker.ready;
+
+          const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+          if (!publicVapidKey) {
+            alert('Push 알림 VAPID 키가 설정되지 않았습니다.');
+            return;
+          }
+
+          const base64UrlToUint8Array = (base64UrlData: string) => {
+            const padding = '='.repeat((4 - base64UrlData.length % 4) % 4);
+            const base64 = (base64UrlData + padding).replace(/\-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+              outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+          };
+
+          let subscription = await registration.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: base64UrlToUint8Array(publicVapidKey)
+            });
+
+            await fetch('/api/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(subscription)
+            });
+            alert('알림 설정이 완료되었습니다.');
+          } else {
+            alert('이미 알림이 설정되어 있습니다.');
+          }
+        } else {
+          alert('알림 권한이 거부되었습니다.');
+        }
+      } catch (error) {
+        console.error('Push error:', error);
+        alert('알림 설정 중 오류가 발생했습니다.');
+      }
+    } else {
+      alert('현재 브라우저는 Push 알림을 지원하지 않습니다.');
+    }
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,53 +347,91 @@ export default function Home() {
       ) : (
         <ul className="space-y-2">
           {list.map(p => (
-            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-row items-center justify-between text-sm overflow-x-auto whitespace-nowrap gap-3">
-              <div className="flex items-center flex-shrink-0">
-                <button
-                  onClick={() => toggleTreatmentStatus(p.id)}
-                  className={`w-6 h-6 mr-3 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none' ? 'border-gray-300 bg-white hover:bg-gray-50' :
-                    p.treatmentDailyStatus === 'done' ? 'border-green-500 bg-green-50 text-green-600' :
-                      'border-red-500 bg-red-50 text-red-600'
-                    }`}
-                >
-                  {p.treatmentDailyStatus === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                  {p.treatmentDailyStatus === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
-                </button>
-                {openDropdownId === p.id ? (
-                  <select
-                    autoFocus
-                    value={p.allocation}
-                    onBlur={() => setOpenDropdownId(null)}
-                    onChange={(e) => {
-                      handleAllocationChange(p.id, e.target.value as AllocationType);
-                      setOpenDropdownId(null);
-                    }}
-                    className="font-bold text-gray-800 bg-white border border-gray-300 rounded px-1 py-0.5 outline-none mr-2 flex-shrink-0"
+            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col gap-2 text-sm">
+              <div className="flex flex-row items-center justify-between overflow-x-auto whitespace-nowrap gap-3">
+                <div className="flex items-center flex-shrink-0">
+                  <button
+                    onClick={() => toggleTreatmentStatus(p.id)}
+                    className={`w-6 h-6 mr-3 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none' ? 'border-gray-300 bg-white hover:bg-gray-50' :
+                      p.treatmentDailyStatus === 'done' ? 'border-green-500 bg-green-50 text-green-600' :
+                        'border-red-500 bg-red-50 text-red-600'
+                      }`}
                   >
-                    <option value="mon-wed">월/수 배정</option>
-                    <option value="tue-thu">화/목 배정</option>
-                    <option value="early">조기 (집중)</option>
-                    <option value="unassigned">대기 목록</option>
-                    <option value="discharge">Discharge</option>
-                  </select>
-                ) : (
-                  <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors mr-2 cursor-pointer text-left focus:outline-none underline decoration-gray-300 underline-offset-4 flex-shrink-0 max-w-[120px] truncate">
-                    {p.name}
+                    {p.treatmentDailyStatus === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                    {p.treatmentDailyStatus === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
                   </button>
-                )}
+                  {openDropdownId === p.id ? (
+                    <select
+                      autoFocus
+                      value={p.allocation}
+                      onBlur={() => setOpenDropdownId(null)}
+                      onChange={(e) => {
+                        handleAllocationChange(p.id, e.target.value as AllocationType);
+                        setOpenDropdownId(null);
+                      }}
+                      className="font-bold text-gray-800 bg-white border border-gray-300 rounded px-1 py-0.5 outline-none mr-2 flex-shrink-0"
+                    >
+                      <option value="mon-wed">월/수 배정</option>
+                      <option value="tue-thu">화/목 배정</option>
+                      <option value="early">조기 (집중)</option>
+                      <option value="unassigned">대기 목록</option>
+                      <option value="discharge">Discharge</option>
+                    </select>
+                  ) : (
+                    <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors mr-2 cursor-pointer text-left focus:outline-none underline decoration-gray-300 underline-offset-4 flex-shrink-0 w-[80px] truncate">
+                      {p.name}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex-shrink-0 w-[80px]">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="병동 / 호실"
+                    className="w-full text-xs px-2 py-1.5 border border-transparent hover:border-gray-200 focus:border-blue-500 rounded outline-none bg-gray-50/50 transition-all text-gray-700 placeholder-gray-400 font-mono"
+                    value={p.memo || ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9.]/g, '');
+                      setPatients(patients.map(patient => patient.id === p.id ? { ...patient, memo: val } : patient));
+                    }}
+                    onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[120px]">
+                  <input
+                    type="text"
+                    placeholder="진단명 입력"
+                    className="w-full text-xs px-2 py-1.5 border border-transparent hover:border-gray-200 focus:border-blue-500 rounded outline-none bg-gray-50/50 transition-all text-gray-700"
+                    value={p.diagnosis || ''}
+                    onChange={(e) => {
+                      setPatients(patients.map(patient => patient.id === p.id ? { ...patient, diagnosis: e.target.value } : patient));
+                    }}
+                    onBlur={async (e) => {
+                      await supabase.from('patients').update({ diagnosis: e.target.value }).eq('id', p.id);
+                    }}
+                  />
+                </div>
               </div>
-              <div className="flex-1 min-w-[120px]">
-                <input
-                  type="text"
-                  placeholder="병동 / 호실 번호"
-                  className="w-full text-xs px-2 py-1.5 border border-transparent hover:border-gray-200 focus:border-blue-500 rounded outline-none bg-gray-50/50 transition-all text-gray-700"
-                  value={p.memo || ''}
-                  onChange={(e) => {
-                    setPatients(patients.map(patient => patient.id === p.id ? { ...patient, memo: e.target.value } : patient));
-                  }}
-                  onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
-                />
-              </div>
+
+              {p.treatmentDailyStatus === 'missed' && (
+                <div className="mt-1 pl-9">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="미시행 사유 입력 (예: 환자 거부, 부재중)"
+                    className="w-full text-xs px-2 py-1.5 border border-red-200 focus:border-red-500 rounded outline-none bg-red-50/50 transition-all text-red-700 placeholder-red-300"
+                    value={p.missedReason || ''}
+                    onChange={(e) => {
+                      setPatients(patients.map(patient => patient.id === p.id ? { ...patient, missedReason: e.target.value } : patient));
+                    }}
+                    onBlur={async (e) => {
+                      await supabase.from('patients').update({ missed_reason: e.target.value }).eq('id', p.id);
+                    }}
+                  />
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -386,6 +449,12 @@ export default function Home() {
           <h1 className="text-base md:text-xl font-bold tracking-tight text-gray-800 truncate max-w-[150px] sm:max-w-none">신규 환자 관리 시스템</h1>
         </div>
         <div className="flex gap-2 md:gap-3">
+          <button
+            onClick={handleEnablePush}
+            className="text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors border border-blue-200"
+          >
+            알림 켜기
+          </button>
           <button
             onClick={() => setIsRegistrationModalOpen(true)}
             className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 md:px-5 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors shadow-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
@@ -553,7 +622,9 @@ export default function Home() {
                             <option value="early">조기 (집중)</option>
                             <option value="discharge">d/c</option>
                           </select>
-                          <span className="sm:ml-2 text-[10px] md:text-xs text-gray-400">({patient.dischargedAt?.toLocaleDateString()})</span>
+                          <span className="sm:ml-2 text-[10px] md:text-xs text-gray-400">
+                            ({patient.dischargedAt && !isNaN(patient.dischargedAt.getTime()) ? patient.dischargedAt.toLocaleDateString() : ''})
+                          </span>
                         </td>
                         <td className="px-3 md:px-6 py-2 md:py-3">
                           <input
