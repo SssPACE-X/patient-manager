@@ -19,7 +19,22 @@ interface Patient {
   treatmentUpdatedAt?: Date;
   diagnosis?: string;
   missedReason?: string;
+  dischargeMemo?: string;
+  infectionStatus?: 'none' | 'contact' | 'respiratory';
 }
+
+const getEffectiveTreatmentStatus = (p: Patient): TreatmentStatus => {
+  if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') return 'none';
+  if (!p.treatmentUpdatedAt) return 'none';
+
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setHours(8, 0, 0, 0);
+  if (now.getHours() < 8) cutoff.setDate(cutoff.getDate() - 1);
+
+  if (p.treatmentUpdatedAt < cutoff) return 'none';
+  return p.treatmentDailyStatus;
+};
 
 const parseSafeDate = (dateStr: string | null | undefined): Date | undefined => {
   if (!dateStr) return undefined;
@@ -31,11 +46,23 @@ const parseSafeDate = (dateStr: string | null | undefined): Date | undefined => 
 
 export default function Home() {
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
+  const [isPushEnabled, setIsPushEnabled] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
 
   // Form State
   const [newName, setNewName] = useState('');
   const [newRegNum, setNewRegNum] = useState('');
+
+  // Push subscription check
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.pushManager.getSubscription().then(sub => {
+          setIsPushEnabled(!!sub);
+        });
+      });
+    }
+  }, []);
 
   // Edit State
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
@@ -93,6 +120,14 @@ export default function Home() {
         .order('created_at', { ascending: false });
 
       if (data) {
+        // Clean up stale discharge_memo for discharge patients in DB
+        const staleDischargePatients = data.filter(
+          p => p.allocation === 'discharge' && p.discharge_memo
+        );
+        for (const sp of staleDischargePatients) {
+          supabase.from('patients').update({ discharge_memo: '' }).eq('id', sp.id);
+        }
+
         setPatients(data.map(p => ({
           id: p.id,
           name: p.name,
@@ -101,8 +136,10 @@ export default function Home() {
           createdAt: parseSafeDate(p.created_at) || new Date(),
           dischargedAt: parseSafeDate(p.discharged_at),
           memo: p.memo || undefined,
+          dischargeMemo: p.allocation === 'discharge' ? '' : (p.discharge_memo || undefined),
           diagnosis: p.diagnosis || undefined,
           missedReason: p.missed_reason || undefined,
+          infectionStatus: p.infection_status as ('none' | 'contact' | 'respiratory') || 'none',
           treatmentDailyStatus: p.treatment_daily_status as TreatmentStatus,
           treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
         })));
@@ -129,8 +166,10 @@ export default function Home() {
               createdAt: parseSafeDate(p.created_at) || new Date(),
               dischargedAt: parseSafeDate(p.discharged_at),
               memo: p.memo || undefined,
+              dischargeMemo: p.discharge_memo || undefined,
               diagnosis: p.diagnosis || undefined,
               missedReason: p.missed_reason || undefined,
+              infectionStatus: p.infection_status || 'none',
               treatmentDailyStatus: p.treatment_daily_status,
               treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
             }, ...prev];
@@ -148,8 +187,10 @@ export default function Home() {
                 createdAt: parseSafeDate(p.created_at) || existing.createdAt,
                 dischargedAt: parseSafeDate(p.discharged_at),
                 memo: p.memo || undefined,
+                dischargeMemo: p.discharge_memo || undefined,
                 diagnosis: p.diagnosis || undefined,
                 missedReason: p.missed_reason || undefined,
+                infectionStatus: p.infection_status || 'none',
                 treatmentDailyStatus: p.treatment_daily_status,
                 treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
               };
@@ -176,8 +217,8 @@ export default function Home() {
       // 1. Check Discharged
       for (const p of patients) {
         if (p.allocation === 'discharge' && p.dischargedAt) {
-          const diffDays = (now.getTime() - p.dischargedAt.getTime()) / (1000 * 3600 * 24);
-          if (diffDays >= 2) {
+          const diffHours = (now.getTime() - p.dischargedAt.getTime()) / (1000 * 3600);
+          if (diffHours >= 40) {
             await supabase.from('patients').delete().eq('id', p.id);
           }
         }
@@ -207,29 +248,35 @@ export default function Home() {
   const handleEnablePush = async () => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window) {
       try {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          const registration = await navigator.serviceWorker.ready;
+        const registration = await navigator.serviceWorker.ready;
+        let subscription = await registration.pushManager.getSubscription();
 
-          const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-          if (!publicVapidKey) {
-            alert('Push 알림 VAPID 키가 설정되지 않았습니다.');
-            return;
+        if (isPushEnabled && subscription) {
+          const success = await subscription.unsubscribe();
+          if (success) {
+            setIsPushEnabled(false);
+            alert('알림이 해제되었습니다.');
           }
-
-          const base64UrlToUint8Array = (base64UrlData: string) => {
-            const padding = '='.repeat((4 - base64UrlData.length % 4) % 4);
-            const base64 = (base64UrlData + padding).replace(/\-/g, '+').replace(/_/g, '/');
-            const rawData = window.atob(base64);
-            const outputArray = new Uint8Array(rawData.length);
-            for (let i = 0; i < rawData.length; ++i) {
-              outputArray[i] = rawData.charCodeAt(i);
+        } else {
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+            if (!publicVapidKey) {
+              alert('Push 알림 VAPID 키가 설정되지 않았습니다.');
+              return;
             }
-            return outputArray;
-          };
 
-          let subscription = await registration.pushManager.getSubscription();
-          if (!subscription) {
+            const base64UrlToUint8Array = (base64UrlData: string) => {
+              const padding = '='.repeat((4 - base64UrlData.length % 4) % 4);
+              const base64 = (base64UrlData + padding).replace(/\-/g, '+').replace(/_/g, '/');
+              const rawData = window.atob(base64);
+              const outputArray = new Uint8Array(rawData.length);
+              for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+              }
+              return outputArray;
+            };
+
             subscription = await registration.pushManager.subscribe({
               userVisibleOnly: true,
               applicationServerKey: base64UrlToUint8Array(publicVapidKey)
@@ -240,12 +287,11 @@ export default function Home() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(subscription)
             });
+            setIsPushEnabled(true);
             alert('알림 설정이 완료되었습니다.');
           } else {
-            alert('이미 알림이 설정되어 있습니다.');
+            alert('알림 권한이 거부되었습니다.');
           }
-        } else {
-          alert('알림 권한이 거부되었습니다.');
         }
       } catch (error) {
         console.error('Push error:', error);
@@ -293,26 +339,39 @@ export default function Home() {
     const p = patients.find(x => x.id === patientId);
     if (!p) return;
 
-    const dischargedAt = newAllocation === 'discharge' && p.allocation !== 'discharge' ? new Date() : p.dischargedAt;
+    const isNewDischarge = newAllocation === 'discharge' && p.allocation !== 'discharge';
+    const dischargedAt = isNewDischarge ? new Date() : p.dischargedAt;
 
     setPatients(patients.map(x => {
       if (x.id !== patientId) return x;
-      return { ...x, allocation: newAllocation, dischargedAt };
+      return {
+        ...x,
+        allocation: newAllocation,
+        dischargedAt,
+        ...(isNewDischarge ? { dischargeMemo: '' } : {})
+      };
     }));
 
-    await supabase.from('patients').update({
+    const updateData: Record<string, unknown> = {
       allocation: newAllocation,
       discharged_at: dischargedAt ? dischargedAt.toISOString() : null
-    }).eq('id', patientId);
+    };
+
+    if (isNewDischarge) {
+      updateData.discharge_memo = '';
+    }
+
+    await supabase.from('patients').update(updateData).eq('id', patientId);
   };
 
   const toggleTreatmentStatus = async (patientId: string) => {
     const p = patients.find(x => x.id === patientId);
     if (!p) return;
 
+    const currentEffectiveStatus = getEffectiveTreatmentStatus(p);
     let nextStatus: TreatmentStatus = 'none';
-    if (!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none') nextStatus = 'done';
-    else if (p.treatmentDailyStatus === 'done') nextStatus = 'missed';
+    if (currentEffectiveStatus === 'none') nextStatus = 'done';
+    else if (currentEffectiveStatus === 'done') nextStatus = 'missed';
     else nextStatus = 'none';
 
     const now = new Date();
@@ -328,11 +387,53 @@ export default function Home() {
     }).eq('id', patientId);
   };
 
+  const toggleInfectionStatus = async (patientId: string) => {
+    const p = patients.find(x => x.id === patientId);
+    if (!p) return;
+
+    let nextStatus: 'none' | 'contact' | 'respiratory' = 'none';
+    if (!p.infectionStatus || p.infectionStatus === 'none') nextStatus = 'contact';
+    else if (p.infectionStatus === 'contact') nextStatus = 'respiratory';
+    else nextStatus = 'none';
+
+    setPatients(patients.map(x => {
+      if (x.id !== patientId) return x;
+      return { ...x, infectionStatus: nextStatus };
+    }));
+
+    await supabase.from('patients').update({
+      infection_status: nextStatus
+    }).eq('id', patientId);
+  };
+
+  const sortPatientsByMemo = (list: Patient[]) => {
+    return [...list].sort((a, b) => {
+      const memoA = (a.memo || '').trim();
+      const memoB = (b.memo || '').trim();
+      if (!memoA && !memoB) return 0;
+      if (!memoA) return 1;
+      if (!memoB) return -1;
+
+      const partsA = memoA.split('.');
+      const partsB = memoB.split('.');
+
+      const maxLen = Math.max(partsA.length, partsB.length);
+      for (let i = 0; i < maxLen; i++) {
+        const pA = partsA[i] || '';
+        const pB = partsB[i] || '';
+        if (pA !== pB) {
+          return pA.localeCompare(pB, undefined, { numeric: true, sensitivity: 'base' });
+        }
+      }
+      return 0;
+    });
+  };
+
   const waitingPatients = patients.filter(p => p.allocation === 'unassigned');
   const assignedPatients = {
-    'mon-wed': patients.filter(p => p.allocation === 'mon-wed'),
-    'tue-thu': patients.filter(p => p.allocation === 'tue-thu'),
-    'early': patients.filter(p => p.allocation === 'early'),
+    'mon-wed': sortPatientsByMemo(patients.filter(p => p.allocation === 'mon-wed')),
+    'tue-thu': sortPatientsByMemo(patients.filter(p => p.allocation === 'tue-thu')),
+    'early': sortPatientsByMemo(patients.filter(p => p.allocation === 'early')),
   };
   const dischargedPatients = patients.filter(p => p.allocation === 'discharge');
 
@@ -348,18 +449,22 @@ export default function Home() {
         <ul className="space-y-2">
           {list.map(p => (
             <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col gap-2 text-sm">
-              <div className="flex flex-row items-center justify-between overflow-x-auto whitespace-nowrap gap-3">
+              <div className="flex flex-row items-center overflow-x-auto whitespace-nowrap gap-1 md:gap-2 pb-1 scrollbar-hide">
                 <div className="flex items-center flex-shrink-0">
                   <button
                     onClick={() => toggleTreatmentStatus(p.id)}
-                    className={`w-6 h-6 mr-3 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${!p.treatmentDailyStatus || p.treatmentDailyStatus === 'none' ? 'border-gray-300 bg-white hover:bg-gray-50' :
-                      p.treatmentDailyStatus === 'done' ? 'border-green-500 bg-green-50 text-green-600' :
-                        'border-red-500 bg-red-50 text-red-600'
+                    title="치료 상태 변경 (클릭시: 시행 ⭢ 미시행 ⭢ 대기)"
+                    className={`w-6 h-6 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${getEffectiveTreatmentStatus(p) === 'none' ? 'border-gray-300 bg-white hover:bg-gray-100 shadow-sm' :
+                      getEffectiveTreatmentStatus(p) === 'done' ? 'border-green-500 bg-green-50 text-green-600 shadow-sm' :
+                        'border-red-500 bg-red-50 text-red-600 shadow-sm'
                       }`}
                   >
-                    {p.treatmentDailyStatus === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                    {p.treatmentDailyStatus === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
+                    {getEffectiveTreatmentStatus(p) === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                    {getEffectiveTreatmentStatus(p) === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
                   </button>
+                </div>
+
+                <div className="flex items-center flex-shrink-0 w-[60px] md:w-[80px]">
                   {openDropdownId === p.id ? (
                     <select
                       autoFocus
@@ -369,41 +474,54 @@ export default function Home() {
                         handleAllocationChange(p.id, e.target.value as AllocationType);
                         setOpenDropdownId(null);
                       }}
-                      className="font-bold text-gray-800 bg-white border border-gray-300 rounded px-1 py-0.5 outline-none mr-2 flex-shrink-0"
+                      className="font-bold text-gray-800 bg-white border border-blue-400 rounded px-1.5 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500 shadow-sm w-full"
                     >
                       <option value="mon-wed">월/수 배정</option>
                       <option value="tue-thu">화/목 배정</option>
                       <option value="early">조기 (집중)</option>
                       <option value="unassigned">대기 목록</option>
-                      <option value="discharge">Discharge</option>
+                      <option value="discharge">d/c</option>
                     </select>
                   ) : (
-                    <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors mr-2 cursor-pointer text-left focus:outline-none underline decoration-gray-300 underline-offset-4 flex-shrink-0 w-[80px] truncate">
+                    <button onClick={() => setOpenDropdownId(p.id)} className="font-bold text-gray-800 hover:text-blue-600 transition-colors text-sm cursor-pointer text-left focus:outline-none underline decoration-gray-300 hover:decoration-blue-400 underline-offset-4 w-full truncate">
                       {p.name}
                     </button>
                   )}
                 </div>
 
-                <div className="flex-shrink-0 w-[80px]">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="병동 / 호실"
-                    className="w-full text-xs px-2 py-1.5 border border-transparent hover:border-gray-200 focus:border-blue-500 rounded outline-none bg-gray-50/50 transition-all text-gray-700 placeholder-gray-400 font-mono"
-                    value={p.memo || ''}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/[^0-9.]/g, '');
-                      setPatients(patients.map(patient => patient.id === p.id ? { ...patient, memo: val } : patient));
-                    }}
-                    onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
-                  />
-                </div>
+                <button
+                  onClick={() => toggleInfectionStatus(p.id)}
+                  className={`w-8 h-8 md:w-9 md:h-9 rounded-lg border-2 text-sm md:text-base font-bold transition-all shadow-sm flex-shrink-0 flex items-center justify-center ${p.infectionStatus === 'contact'
+                      ? 'bg-orange-100 text-orange-600 border-orange-400 ring-2 ring-orange-200'
+                      : p.infectionStatus === 'respiratory'
+                        ? 'bg-purple-100 text-purple-600 border-purple-400 ring-2 ring-purple-200'
+                        : 'bg-gray-100 text-gray-400 border-gray-300 hover:bg-gray-200 hover:border-gray-400'
+                    }`}
+                  title="감염 정보 (클릭: 접촉감염 ⭢ 호흡기계감염 ⭢ 초기화)"
+                >
+                  {p.infectionStatus === 'contact' ? '☣' : p.infectionStatus === 'respiratory' ? '😷' : '−'}
+                </button>
+
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="병동.호실"
+                  title="우선순위 정렬 기준입니다. 숫자 및 문자(NCU 등) 입력 가능"
+                  className="w-[60px] md:w-[80px] text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 font-mono shadow-sm focus:ring-1 focus:ring-blue-500 flex-shrink-0"
+                  value={p.memo || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setPatients(patients.map(patient => patient.id === p.id ? { ...patient, memo: val } : patient));
+                  }}
+                  onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
+                />
 
                 <div className="flex-1 min-w-[120px]">
                   <input
                     type="text"
-                    placeholder="진단명 입력"
-                    className="w-full text-xs px-2 py-1.5 border border-transparent hover:border-gray-200 focus:border-blue-500 rounded outline-none bg-gray-50/50 transition-all text-gray-700"
+                    placeholder="진단명"
+                    title="진단명 입력"
+                    className="w-full text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 shadow-sm focus:ring-1 focus:ring-blue-500"
                     value={p.diagnosis || ''}
                     onChange={(e) => {
                       setPatients(patients.map(patient => patient.id === p.id ? { ...patient, diagnosis: e.target.value } : patient));
@@ -415,7 +533,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {p.treatmentDailyStatus === 'missed' && (
+              {getEffectiveTreatmentStatus(p) === 'missed' && (
                 <div className="mt-1 pl-9">
                   <input
                     type="text"
@@ -441,28 +559,44 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans break-words">
-      <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 md:py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-2 md:gap-3">
-          <div className="w-7 h-7 md:w-8 md:h-8 bg-blue-600 text-white flex items-center justify-center rounded-lg font-bold text-base md:text-lg">
-            +
+      <div className="sticky top-0 z-20 flex flex-col shadow-sm">
+        <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 md:py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="w-7 h-7 md:w-8 md:h-8 bg-blue-600 text-white flex items-center justify-center rounded-lg font-bold text-base md:text-lg">
+              +
+            </div>
+            <h1 className="text-base md:text-xl font-bold tracking-tight text-gray-800 truncate max-w-[150px] sm:max-w-none">신규 환자 관리 시스템</h1>
           </div>
-          <h1 className="text-base md:text-xl font-bold tracking-tight text-gray-800 truncate max-w-[150px] sm:max-w-none">신규 환자 관리 시스템</h1>
+          <div className="flex gap-2 md:gap-3">
+            <button
+              onClick={handleEnablePush}
+              className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors border ${isPushEnabled ? 'bg-green-500 hover:bg-green-600 text-white border-green-600 shadow-inner' : 'text-blue-600 bg-blue-50 hover:bg-blue-100 border-blue-200 shadow-sm'}`}
+            >
+              {isPushEnabled ? '알림 켜짐' : '알림 켜기'}
+            </button>
+            <button
+              onClick={() => setIsRegistrationModalOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 md:px-5 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors shadow-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
+            >
+              <span>+</span> 환자 등록
+            </button>
+          </div>
+        </header>
+
+        {/* Total Status Summary */}
+        <div className="bg-gray-50/95 backdrop-blur-sm border-b border-gray-200 px-4 md:px-6 py-2 md:py-3 shadow-inner">
+          <div className="flex items-center justify-between text-xs md:text-sm max-w-7xl mx-auto w-full">
+            <div className="flex items-center gap-3 md:gap-6 font-medium text-gray-600 overflow-x-auto whitespace-nowrap scrollbar-hide">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span>월/수 {assignedPatients['mon-wed'].length}명</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span>화/목 {assignedPatients['tue-thu'].length}명</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span>조기 {assignedPatients['early'].length}명</span>
+            </div>
+            <div className="font-bold text-gray-900 bg-white px-3 py-1 rounded-md border border-gray-200 shadow-sm flex-shrink-0 ml-3">
+              총 배정 {assignedPatients['mon-wed'].length + assignedPatients['tue-thu'].length + assignedPatients['early'].length}명
+            </div>
+          </div>
         </div>
-        <div className="flex gap-2 md:gap-3">
-          <button
-            onClick={handleEnablePush}
-            className="text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors border border-blue-200"
-          >
-            알림 켜기
-          </button>
-          <button
-            onClick={() => setIsRegistrationModalOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 md:px-5 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors shadow-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
-          >
-            <span>+</span> 환자 등록
-          </button>
-        </div>
-      </header>
+      </div>
 
       <main className="w-full max-w-7xl mx-auto px-4 md:px-6 py-4 md:py-8">
         {/* Assigned Patients View */}
@@ -629,13 +763,16 @@ export default function Home() {
                         <td className="px-3 md:px-6 py-2 md:py-3">
                           <input
                             type="text"
-                            placeholder="메모 입력..."
-                            className="w-full text-xs px-2 py-1.5 border border-transparent hover:border-gray-200 focus:border-blue-500 rounded outline-none bg-transparent transition-all"
-                            value={patient.memo || ''}
+                            placeholder="입력..."
+                            title="d/c 사유나 다른 메모를 입력하세요"
+                            className="w-full text-xs px-2 py-1.5 border border-gray-300 hover:border-gray-400 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 shadow-sm focus:ring-1 focus:ring-blue-500"
+                            value={patient.dischargeMemo ?? ''}
                             onChange={(e) => {
-                              setPatients(patients.map(p => p.id === patient.id ? { ...p, memo: e.target.value } : p));
+                              setPatients(patients.map(p => p.id === patient.id ? { ...p, dischargeMemo: e.target.value } : p));
                             }}
-                            onBlur={(e) => handleMemoBlur(patient.id, e.target.value)}
+                            onBlur={async (e) => {
+                              await supabase.from('patients').update({ discharge_memo: e.target.value }).eq('id', patient.id);
+                            }}
                           />
                         </td>
                       </tr>
