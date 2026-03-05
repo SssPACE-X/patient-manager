@@ -448,23 +448,22 @@ export default function Home() {
       ) : (
         <ul className="space-y-2">
           {list.map(p => (
-            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col gap-2 text-sm">
-              <div className="flex flex-row items-center overflow-x-auto whitespace-nowrap gap-1 md:gap-2 pb-1 scrollbar-hide">
-                <div className="flex items-center flex-shrink-0">
-                  <button
-                    onClick={() => toggleTreatmentStatus(p.id)}
-                    title="치료 상태 변경 (클릭시: 시행 ⭢ 미시행 ⭢ 대기)"
-                    className={`w-6 h-6 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${getEffectiveTreatmentStatus(p) === 'none' ? 'border-gray-300 bg-white hover:bg-gray-100 shadow-sm' :
-                      getEffectiveTreatmentStatus(p) === 'done' ? 'border-green-500 bg-green-50 text-green-600 shadow-sm' :
-                        'border-red-500 bg-red-50 text-red-600 shadow-sm'
-                      }`}
-                  >
-                    {getEffectiveTreatmentStatus(p) === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                    {getEffectiveTreatmentStatus(p) === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
-                  </button>
-                </div>
+            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col gap-1 text-sm">
+              {/* Row 1: Checkbox + Name + Infection + Ward/Room */}
+              <div className="flex flex-row items-center gap-1 md:gap-2">
+                <button
+                  onClick={() => toggleTreatmentStatus(p.id)}
+                  title="치료 상태 변경 (클릭시: 시행 ⭢ 미시행 ⭢ 대기)"
+                  className={`w-6 h-6 flex-shrink-0 flex items-center justify-center rounded border transition-colors ${getEffectiveTreatmentStatus(p) === 'none' ? 'border-gray-300 bg-white hover:bg-gray-100 shadow-sm' :
+                    getEffectiveTreatmentStatus(p) === 'done' ? 'border-green-500 bg-green-50 text-green-600 shadow-sm' :
+                      'border-red-500 bg-red-50 text-red-600 shadow-sm'
+                    }`}
+                >
+                  {getEffectiveTreatmentStatus(p) === 'done' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                  {getEffectiveTreatmentStatus(p) === 'missed' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>}
+                </button>
 
-                <div className="flex items-center flex-shrink-0 w-[60px] md:w-[80px]">
+                <div className="flex-shrink-0" style={{ width: '60px' }}>
                   {openDropdownId === p.id ? (
                     <select
                       autoFocus
@@ -491,11 +490,11 @@ export default function Home() {
 
                 <button
                   onClick={() => toggleInfectionStatus(p.id)}
-                  className={`w-8 h-8 md:w-9 md:h-9 rounded-lg border-2 text-sm md:text-base font-bold transition-all shadow-sm flex-shrink-0 flex items-center justify-center ${p.infectionStatus === 'contact'
-                      ? 'bg-orange-100 text-orange-600 border-orange-400 ring-2 ring-orange-200'
-                      : p.infectionStatus === 'respiratory'
-                        ? 'bg-purple-100 text-purple-600 border-purple-400 ring-2 ring-purple-200'
-                        : 'bg-gray-100 text-gray-400 border-gray-300 hover:bg-gray-200 hover:border-gray-400'
+                  className={`w-7 h-7 rounded-lg border-2 text-sm font-bold transition-all shadow-sm flex-shrink-0 flex items-center justify-center ${p.infectionStatus === 'contact'
+                    ? 'bg-orange-100 text-orange-600 border-orange-400 ring-2 ring-orange-200'
+                    : p.infectionStatus === 'respiratory'
+                      ? 'bg-purple-100 text-purple-600 border-purple-400 ring-2 ring-purple-200'
+                      : 'bg-gray-100 text-gray-400 border-gray-300 hover:bg-gray-200 hover:border-gray-400'
                     }`}
                   title="감염 정보 (클릭: 접촉감염 ⭢ 호흡기계감염 ⭢ 초기화)"
                 >
@@ -507,7 +506,8 @@ export default function Home() {
                   inputMode="decimal"
                   placeholder="병동.호실"
                   title="우선순위 정렬 기준입니다. 숫자 및 문자(NCU 등) 입력 가능"
-                  className="w-[60px] md:w-[80px] text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 font-mono shadow-sm focus:ring-1 focus:ring-blue-500 flex-shrink-0"
+                  style={{ width: '70px' }}
+                  className="text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 font-mono shadow-sm focus:ring-1 focus:ring-blue-500 flex-shrink-0"
                   value={p.memo || ''}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -516,7 +516,7 @@ export default function Home() {
                   onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
                 />
 
-                <div className="flex-1 min-w-[120px]">
+                <div className="flex-1 min-w-0 overflow-hidden">
                   <input
                     type="text"
                     placeholder="진단명"
