@@ -448,9 +448,9 @@ export default function Home() {
       ) : (
         <ul className="space-y-2">
           {list.map(p => (
-            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col gap-1 text-sm">
+            <li key={p.id} className="bg-white rounded p-3 shadow-sm border border-gray-100 flex flex-col gap-1.5 text-sm">
               {/* Row 1: Checkbox + Name + Infection + Ward/Room */}
-              <div className="flex flex-row items-center gap-1 md:gap-2">
+              <div className="flex flex-row items-center gap-1.5">
                 <button
                   onClick={() => toggleTreatmentStatus(p.id)}
                   title="치료 상태 변경 (클릭시: 시행 ⭢ 미시행 ⭢ 대기)"
@@ -506,8 +506,7 @@ export default function Home() {
                   inputMode="decimal"
                   placeholder="병동.호실"
                   title="우선순위 정렬 기준입니다. 숫자 및 문자(NCU 등) 입력 가능"
-                  style={{ width: '70px' }}
-                  className="text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 font-mono shadow-sm focus:ring-1 focus:ring-blue-500 flex-shrink-0"
+                  className="flex-1 min-w-0 text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 font-mono shadow-sm focus:ring-1 focus:ring-blue-500"
                   value={p.memo || ''}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -515,22 +514,22 @@ export default function Home() {
                   }}
                   onBlur={(e) => handleMemoBlur(p.id, e.target.value)}
                 />
-
-                <div className="flex-1 min-w-0 overflow-hidden">
-                  <input
-                    type="text"
-                    placeholder="진단명"
-                    title="진단명 입력"
-                    className="w-full text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 shadow-sm focus:ring-1 focus:ring-blue-500"
-                    value={p.diagnosis || ''}
-                    onChange={(e) => {
-                      setPatients(patients.map(patient => patient.id === p.id ? { ...patient, diagnosis: e.target.value } : patient));
-                    }}
-                    onBlur={async (e) => {
-                      await supabase.from('patients').update({ diagnosis: e.target.value }).eq('id', p.id);
-                    }}
-                  />
-                </div>
+              </div>
+              {/* Row 2: Diagnosis */}
+              <div style={{ paddingLeft: '30px' }}>
+                <input
+                  type="text"
+                  placeholder="진단명"
+                  title="진단명 입력"
+                  className="w-full text-xs px-2 py-1.5 border border-gray-200 hover:border-gray-300 focus:border-blue-500 rounded outline-none bg-white transition-all text-gray-800 shadow-sm focus:ring-1 focus:ring-blue-500"
+                  value={p.diagnosis || ''}
+                  onChange={(e) => {
+                    setPatients(patients.map(patient => patient.id === p.id ? { ...patient, diagnosis: e.target.value } : patient));
+                  }}
+                  onBlur={async (e) => {
+                    await supabase.from('patients').update({ diagnosis: e.target.value }).eq('id', p.id);
+                  }}
+                />
               </div>
 
               {getEffectiveTreatmentStatus(p) === 'missed' && (
