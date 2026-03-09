@@ -120,14 +120,6 @@ export default function Home() {
         .order('created_at', { ascending: false });
 
       if (data) {
-        // Clean up stale discharge_memo for discharge patients in DB
-        const staleDischargePatients = data.filter(
-          p => p.allocation === 'discharge' && p.discharge_memo
-        );
-        for (const sp of staleDischargePatients) {
-          supabase.from('patients').update({ discharge_memo: '' }).eq('id', sp.id);
-        }
-
         setPatients(data.map(p => ({
           id: p.id,
           name: p.name,
@@ -136,7 +128,7 @@ export default function Home() {
           createdAt: parseSafeDate(p.created_at) || new Date(),
           dischargedAt: parseSafeDate(p.discharged_at),
           memo: p.memo || undefined,
-          dischargeMemo: p.allocation === 'discharge' ? '' : (p.discharge_memo || undefined),
+          dischargeMemo: p.discharge_memo || undefined,
           diagnosis: p.diagnosis || undefined,
           missedReason: p.missed_reason || undefined,
           infectionStatus: p.infection_status as ('none' | 'contact' | 'respiratory') || 'none',
