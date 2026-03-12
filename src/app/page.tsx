@@ -46,6 +46,7 @@ const parseSafeDate = (dateStr: string | null | undefined): Date | undefined => 
 
 export default function Home() {
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [isPushEnabled, setIsPushEnabled] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
 
@@ -562,6 +563,12 @@ export default function Home() {
           </div>
           <div className="flex gap-2 md:gap-3">
             <button
+              onClick={() => setIsArchiveModalOpen(true)}
+              className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors border border-gray-200 shadow-sm flex items-center gap-1 md:gap-2 whitespace-nowrap"
+            >
+              <span>📁</span> 과거 기록
+            </button>
+            <button
               onClick={handleEnablePush}
               className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors border ${isPushEnabled ? 'bg-green-500 hover:bg-green-600 text-white border-green-600 shadow-inner' : 'text-blue-600 bg-blue-50 hover:bg-blue-100 border-blue-200 shadow-sm'}`}
             >
@@ -777,53 +784,68 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Deleted (Archived) Patients View */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-300 overflow-hidden flex flex-col mt-8">
-          <div className="border-b border-gray-200 bg-gray-100 px-4 md:px-6 py-3 md:py-4 flex justify-between items-center">
-            <h2 className="text-base md:text-lg font-semibold text-gray-700">과거 D/C 기록 (보관됨)</h2>
-            <span className="bg-gray-200 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full">총 {deletedPatients.length}명</span>
-          </div>
+      </main>
 
-          <div className="flex-1 p-0">
-            {deletedPatients.length === 0 ? (
-              <div className="text-center py-12 text-gray-400">
-                <p className="text-sm">과거 D/C된 환자 기록이 없습니다.</p>
+      {/* Archive Modal */}
+      {isArchiveModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 border border-gray-300">
+            <div className="px-5 py-4 border-b border-gray-200 bg-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-bold text-gray-800">과거 D/C 기록 (보관됨)</h2>
+                <span className="bg-gray-200 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-gray-300">총 {deletedPatients.length}명</span>
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left whitespace-nowrap md:whitespace-normal">
-                  <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">등록 번호</th>
-                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">환자 이름</th>
-                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">등록일</th>
-                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">d/c일</th>
-                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium min-w-[150px] md:w-1/3">비고</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {deletedPatients.map((patient) => (
-                      <tr key={patient.id} className="bg-white hover:bg-gray-50 transition-colors">
-                        <td className="px-3 md:px-6 py-3 md:py-4 font-mono text-gray-600">{patient.regNumber}</td>
-                        <td className="px-3 md:px-6 py-3 md:py-4 font-medium text-gray-900">{patient.name}</td>
-                        <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs">
-                          {patient.createdAt.toLocaleDateString()}
-                        </td>
-                        <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs">
-                          {patient.dischargedAt ? patient.dischargedAt.toLocaleDateString() : '-'}
-                        </td>
-                        <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs break-all">
-                          {patient.dischargeMemo || '-'}
-                        </td>
+              <button
+                onClick={() => setIsArchiveModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors bg-white rounded-full p-1 border border-gray-200 hover:bg-gray-50"
+                type="button"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <div className="flex-1 p-0 overflow-y-auto bg-gray-50">
+              {deletedPatients.length === 0 ? (
+                <div className="text-center py-16 text-gray-400 flex flex-col items-center">
+                  <span className="text-4xl mb-3 opacity-20">📁</span>
+                  <p className="text-sm">과거 D/C된 환자 기록이 없습니다.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto min-h-full h-full align-top bg-white">
+                  <table className="w-full text-sm text-left whitespace-nowrap md:whitespace-normal">
+                    <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-3 md:px-6 py-3 md:py-4 font-medium">등록 번호</th>
+                        <th className="px-3 md:px-6 py-3 md:py-4 font-medium">환자 이름</th>
+                        <th className="px-3 md:px-6 py-3 md:py-4 font-medium">등록일</th>
+                        <th className="px-3 md:px-6 py-3 md:py-4 font-medium">d/c일</th>
+                        <th className="px-3 md:px-6 py-3 md:py-4 font-medium min-w-[150px] md:w-1/3">비고</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 align-top">
+                      {deletedPatients.map((patient) => (
+                        <tr key={patient.id} className="bg-white hover:bg-gray-50 transition-colors">
+                          <td className="px-3 md:px-6 py-3 md:py-4 font-mono text-gray-600 align-middle">{patient.regNumber}</td>
+                          <td className="px-3 md:px-6 py-3 md:py-4 font-medium text-gray-900 align-middle">{patient.name}</td>
+                          <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs align-middle">
+                            {patient.createdAt.toLocaleDateString()}
+                          </td>
+                          <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs align-middle">
+                            {patient.dischargedAt ? patient.dischargedAt.toLocaleDateString() : '-'}
+                          </td>
+                          <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs break-all align-middle">
+                            {patient.dischargeMemo || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </main>
+      )}
 
       {/* Registration Modal */}
       {isRegistrationModalOpen && (
