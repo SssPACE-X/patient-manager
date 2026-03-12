@@ -778,14 +778,18 @@ export default function Home() {
         </div>
 
         {/* Deleted (Archived) Patients View */}
-        {deletedPatients.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-300 overflow-hidden flex flex-col mt-8">
-            <div className="border-b border-gray-200 bg-gray-100 px-4 md:px-6 py-3 md:py-4 flex justify-between items-center">
-              <h2 className="text-base md:text-lg font-semibold text-gray-700">과거 D/C 기록 (보관됨)</h2>
-              <span className="bg-gray-200 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full">총 {deletedPatients.length}명</span>
-            </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-300 overflow-hidden flex flex-col mt-8">
+          <div className="border-b border-gray-200 bg-gray-100 px-4 md:px-6 py-3 md:py-4 flex justify-between items-center">
+            <h2 className="text-base md:text-lg font-semibold text-gray-700">과거 D/C 기록 (보관됨)</h2>
+            <span className="bg-gray-200 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full">총 {deletedPatients.length}명</span>
+          </div>
 
-            <div className="flex-1 p-0">
+          <div className="flex-1 p-0">
+            {deletedPatients.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <p className="text-sm">과거 D/C된 환자 기록이 없습니다.</p>
+              </div>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left whitespace-nowrap md:whitespace-normal">
                   <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
@@ -816,9 +820,9 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </main>
 
       {/* Registration Modal */}
