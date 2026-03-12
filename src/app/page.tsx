@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
-type AllocationType = 'unassigned' | 'mon-wed' | 'tue-thu' | 'early' | 'discharge';
+type AllocationType = 'unassigned' | 'mon-wed' | 'tue-thu' | 'early' | 'discharge' | 'deleted';
 
 type TreatmentStatus = 'none' | 'done' | 'missed';
 
@@ -20,7 +20,7 @@ interface Patient {
   diagnosis?: string;
   missedReason?: string;
   dischargeMemo?: string;
-  infectionStatus?: 'none' | 'contact' | 'respiratory';
+  infectionStatus?: 'none' | 'contact' | 'respiratory' | 'blood';
 }
 
 const getEffectiveTreatmentStatus = (p: Patient): TreatmentStatus => {
@@ -131,7 +131,7 @@ export default function Home() {
           dischargeMemo: p.discharge_memo || undefined,
           diagnosis: p.diagnosis || undefined,
           missedReason: p.missed_reason || undefined,
-          infectionStatus: p.infection_status as ('none' | 'contact' | 'respiratory') || 'none',
+          infectionStatus: (p.infection_status as ('none' | 'contact' | 'respiratory' | 'blood')) || 'none',
           treatmentDailyStatus: p.treatment_daily_status as TreatmentStatus,
           treatmentUpdatedAt: parseSafeDate(p.treatment_updated_at),
         })));
@@ -211,7 +211,7 @@ export default function Home() {
         if (p.allocation === 'discharge' && p.dischargedAt) {
           const diffHours = (now.getTime() - p.dischargedAt.getTime()) / (1000 * 3600);
           if (diffHours >= 40) {
-            await supabase.from('patients').delete().eq('id', p.id);
+            await supabase.from('patients').update({ allocation: 'deleted' }).eq('id', p.id);
           }
         }
       }
@@ -383,9 +383,10 @@ export default function Home() {
     const p = patients.find(x => x.id === patientId);
     if (!p) return;
 
-    let nextStatus: 'none' | 'contact' | 'respiratory' = 'none';
+    let nextStatus: 'none' | 'contact' | 'respiratory' | 'blood' = 'none';
     if (!p.infectionStatus || p.infectionStatus === 'none') nextStatus = 'contact';
     else if (p.infectionStatus === 'contact') nextStatus = 'respiratory';
+    else if (p.infectionStatus === 'respiratory') nextStatus = 'blood';
     else nextStatus = 'none';
 
     setPatients(patients.map(x => {
@@ -428,6 +429,7 @@ export default function Home() {
     'early': sortPatientsByMemo(patients.filter(p => p.allocation === 'early')),
   };
   const dischargedPatients = patients.filter(p => p.allocation === 'discharge');
+  const deletedPatients = patients.filter(p => p.allocation === 'deleted');
 
   const renderAssignedList = (title: string, list: Patient[], bgClass: string, textClass: string) => (
     <div className={`rounded-xl shadow-sm border p-4 flex flex-col gap-4 ${bgClass}`}>
@@ -481,15 +483,17 @@ export default function Home() {
 
                 <button
                   onClick={() => toggleInfectionStatus(p.id)}
-                  className={`w-7 h-7 rounded-lg border-2 text-sm font-bold transition-all shadow-sm flex-shrink-0 flex items-center justify-center ${p.infectionStatus === 'contact'
-                    ? 'bg-orange-100 text-orange-600 border-orange-400 ring-2 ring-orange-200'
+                  className={`w-7 h-7 rounded-lg border-2 text-[15px] font-medium transition-all shadow-sm flex-shrink-0 flex items-center justify-center ${p.infectionStatus === 'contact'
+                    ? 'bg-orange-50 border-orange-200 ring-2 ring-orange-100'
                     : p.infectionStatus === 'respiratory'
-                      ? 'bg-purple-100 text-purple-600 border-purple-400 ring-2 ring-purple-200'
-                      : 'bg-gray-100 text-gray-400 border-gray-300 hover:bg-gray-200 hover:border-gray-400'
+                      ? 'bg-purple-50 border-purple-200 ring-2 ring-purple-100'
+                      : p.infectionStatus === 'blood'
+                        ? 'bg-red-50 border-red-200 ring-2 ring-red-100'
+                        : 'bg-gray-100 text-gray-400 border-gray-300 hover:bg-gray-200 hover:border-gray-400 font-bold'
                     }`}
-                  title="감염 정보 (클릭: 접촉감염 ⭢ 호흡기계감염 ⭢ 초기화)"
+                  title="감염 상태 (클릭: 접촉전파감염 ⭢ 공기전파감염 ⭢ 혈액전파감염 ⭢ 초기화)"
                 >
-                  {p.infectionStatus === 'contact' ? '☣' : p.infectionStatus === 'respiratory' ? '😷' : '−'}
+                  {p.infectionStatus === 'contact' ? '🧤' : p.infectionStatus === 'respiratory' ? '😷' : p.infectionStatus === 'blood' ? '🩸' : '−'}
                 </button>
 
                 <input
@@ -772,6 +776,49 @@ export default function Home() {
             )}
           </div>
         </div>
+
+        {/* Deleted (Archived) Patients View */}
+        {deletedPatients.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-300 overflow-hidden flex flex-col mt-8">
+            <div className="border-b border-gray-200 bg-gray-100 px-4 md:px-6 py-3 md:py-4 flex justify-between items-center">
+              <h2 className="text-base md:text-lg font-semibold text-gray-700">과거 D/C 기록 (보관됨)</h2>
+              <span className="bg-gray-200 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full">총 {deletedPatients.length}명</span>
+            </div>
+
+            <div className="flex-1 p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left whitespace-nowrap md:whitespace-normal">
+                  <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">등록 번호</th>
+                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">환자 이름</th>
+                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">등록일</th>
+                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium">d/c일</th>
+                      <th className="px-3 md:px-6 py-3 md:py-4 font-medium min-w-[150px] md:w-1/3">비고</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {deletedPatients.map((patient) => (
+                      <tr key={patient.id} className="bg-white hover:bg-gray-50 transition-colors">
+                        <td className="px-3 md:px-6 py-3 md:py-4 font-mono text-gray-600">{patient.regNumber}</td>
+                        <td className="px-3 md:px-6 py-3 md:py-4 font-medium text-gray-900">{patient.name}</td>
+                        <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs">
+                          {patient.createdAt.toLocaleDateString()}
+                        </td>
+                        <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs">
+                          {patient.dischargedAt ? patient.dischargedAt.toLocaleDateString() : '-'}
+                        </td>
+                        <td className="px-3 md:px-6 py-3 md:py-4 text-gray-600 text-xs break-all">
+                          {patient.dischargeMemo || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Registration Modal */}
